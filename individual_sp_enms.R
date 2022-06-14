@@ -65,13 +65,17 @@ for(sp in speciesList) {
   rangeName <- paste0('littleRange_', gsub('_', '', speciesAb_))
   
   # load Little range map for given species
-  load(paste0('./range_maps/', rangeName, '.Rdata'))
+  range <- paste0('/Volumes/lj_mac_22/MOBOT/USTreeAtlas/SHP/', 
+                  tolower(gsub('_', '', speciesAb_)), '/',
+                  tolower(gsub('_', '', speciesAb_)),
+                  '.shp')
+  range <- suppressWarnings(shapefile(range))
+  projection(range) <- enmSdm::getCRS('nad27')
+  range <- range[range$CODE == 1, ] # remove holes
   
   if (file.exists(paste0('./species_records/03_', gsub(' ', '_', tolower(sp)), '_final_records.rData'))) { # if already cleaned, load cleaned data set
     print('Already cleaned!\n')
   } else { # otherwise, clean the data! #
-    range <- rangeMap
-    rm(rangeMap)
     
     recordsFileName <- paste0('./species_records/01_', 
                               gsub(' ', '_', tolower(sp)), 
@@ -100,6 +104,11 @@ for(sp in speciesList) {
       # remove records before 1900
       occs$year <- substr(occs$date_collected, 1, 4)
       occs <- occs[occs$year >= 1900, ]
+      
+      # remove records outside of study region countries
+      occs <- occs[(occs$country == 'United States' 
+                   | occs$country == 'Canada'
+                   | occs$country == 'Mexico' ),]
       
       # if date_collected column is duplicated, remove one of them
       occs <- occs[!duplicated(as.list(occs))]
@@ -401,6 +410,7 @@ for(sp in speciesList) {
                  length(which(speciesSf_thinned_buffered$within_buffer == 0)), '\n'))
   
   }
+  sink()
 
   sink('./ENM_script.txt')
   for (gcm in gcmList) {
@@ -600,10 +610,9 @@ for(sp in speciesList) {
     
     envMapSp <- rasterToPolygons(envMap) # convert to spatial object for plotting
     
-    plot(rangeMap, border = 'blue', main = paste0('Maxent output, ', sp,
-                                                  ' occurrences'))
+    plot(range, border = 'blue', main = paste0('Maxent output, ', sp))
     plot(envMap, add = TRUE)
-    plot(rangeMap, border = 'blue', add = TRUE)
+    plot(range, border = 'blue', add = TRUE)
     map("state", add = TRUE)
     map("world", add = TRUE)
     points(records$longitude, records$latitude, pch = 16, cex = 0.6, col = 'red')
@@ -611,7 +620,7 @@ for(sp in speciesList) {
     plot(envMap, main = paste0('Maxent output, ', 
                                sp,
                                ' occurrences'))
-    plot(rangeMap, border = 'blue', add = TRUE)
+    plot(range, border = 'blue', add = TRUE)
     
     modelFileName <- paste0('./models/', speciesAb_, '_Maxent_PC', 
                             pc, '_GCM_', gcm, '.Rdata')
@@ -619,7 +628,7 @@ for(sp in speciesList) {
     
     outputFileName <- paste0('./models/predictions/', speciesAb_, 
                               '/GCM_', gcm, '_PC', pc, '.rData')
-    save(rangeMap, envMap, envModel, records, file = outputFileName, overwrite = T)
+    save(range, envMap, envModel, records, file = outputFileName, overwrite = T)
   }
   sink()
 }
