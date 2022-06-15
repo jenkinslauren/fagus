@@ -32,6 +32,7 @@ library(tidyr)
 
 # enm tools #
 library(enmSdm)
+library(maxnet)
 
 ## genus constants ##
 genus <- 'fagus'
@@ -47,6 +48,7 @@ wgs84_crs <- getCRS('wgs84')
 ll <- c('longitude', 'latitude')
 
 yrs <- seq(22 , 1, by = -1) # timestep indicies helper
+climYears <- seq(21000, 0, by=-1000)
 climYear <- 0 # only modeling present-day in this script
 
 pc <- 5 # number of principal components used from environmental data
@@ -55,6 +57,107 @@ gcmList <- c('hadley', 'ccsm', 'ecbilt') # general circulation models for env da
 
 # reference raster from ccsm env data for cell size, used in thinning
 lorenzRast <- raster::raster('/Volumes/lj_mac_22/MOBOT/PVMvsENM/data_and_analyses/env_data/Lorenz/V2/ccsm_21-0k_all_tifs_LJ/0BP/an_avg_ETR.tif')
+
+## helper functions ##
+getClimRasts <- function(pc, climYear) { # retrieve clipped climate rasters for a given year
+  
+  # load climate for given gcm 
+  load(paste0('/Volumes/lj_mac_22/MOBOT/by_genus/env_data/', gcm, 
+              '/PCA_climate_rasters_pc', pc, '.Rdata'))
+  
+  if(exists('lorenz')) {
+    clim <- lorenz
+    rm(lorenz)
+  }
+  
+  load(paste0('/Volumes/lj_mac_22/MOBOT/by_genus/env_data/', gcm, 
+              '/PCA_prcomp_pc', pc, '.Rdata'))
+  
+  # set constants for given gcm
+  fileName <- paste0('/Volumes/lj_mac_22/MOBOT/by_genus/env_data/', gcm, 
+                     '/clipped_data/envDataClipped_', climYear, 'YBP_pc', pc, '.tif')
+  vars <- names(clim[[1]])
+  
+  if(gcm == 'hadley') {
+    land <- raster(paste0('/Volumes/lj_mac_22/MOBOT/by_genus/env_data/', 
+                          gcm, '/tifs/', vars[1], '/', vars[1],
+                          '_', climYear, 'ybp.tif'))
+  } else if (gcm == 'ccsm' | gcm == 'ecbilt') {
+    land <- raster(paste0('/Volumes/lj_mac_22/MOBOT/by_genus/env_data/', gcm,
+                          '/tifs/', climYear, 'BP/', vars[1], '.tif')) 
+  }
+  
+  ## load environment data from PCA ##
+  if (file.exists(fileName)) {  # if already clipped to respective year, load that 
+    envData <- brick(fileName)
+    names(envData) <- paste0('pca', 1:pc) # rename raster layers to match pc
+  } else { # otherwise, clip data to correct climate year
+    pcPrediction <- list()
+    
+    for (i in 1:length(clim)) { # label each env layer by variable name and year
+      names(clim[[i]]) <- vars
+      pcPrediction[i] <- raster::predict(clim[[i]], pca, index = 1:pc)
+      names(pcPrediction[[i]]) <- paste0("pc", 1:pc, "_", (i-1)*1000, "KYBP")
+    }
+    
+    envDataPca <- stack(pcPrediction)
+    
+    envYr <- pcPrediction[[(climYear/1000) + 1]] # keep only the PCA rasters for given climate year
+    names(envYr) <- paste0('pca', 1:pc) # label layers by pc
+    
+    ## sanity check for ensuring the rasters are in the correct projection
+    # print("Ensure that the projection of these rasters is WGS84:")
+    # print(paste0("Projection of envYr = ", projection(envYr)))
+    
+    envDataClipped <- list()
+    
+    for (n in 1:nlayers(envYr)) { # clip PCAs to study extent for given species
+      x <- envYr[[n]]
+      x <- crop(x, extent(studyRegionRasts[[n]]))
+      projection(x) <- getCRS("WGS84")
+      envDataClipped[[n]] <- x
+    }
+    
+    envData <- stack(envDataClipped)
+    
+    # plot(envData) # plot clipped environmental pca rasters
+    writeRaster(envData, fileName, format = 'GTiff', overwrite = T) # save clipped data
+    
+  } 
+  
+  return(envData)
+  
+}
+
+getPredictions <- function(speciesAb_, pc) { # predict suitability for a given year
+  
+  predictors <- c(paste0('pca', 1:pc))
+  
+  for (yr in climYears) {
+    climate <- getClimRasts(pc = 5, climYear = yr) # retrieve clipped climate for given year
+    # plot(climate[[1]], main = paste0(climYear, ' ybp')) 
+    
+    # predict suitability #
+    thisPred <- predict(climate[[predictors]], 
+                                      envModel, 
+                                      clamp = F, 
+                                      type='cloglog')
+    names(thisPred) <- (paste0(yr, ' ybp'))
+    # plot(thisPred, main = paste0("prediction at ", climYear, " ybp"))
+    
+    preds <- if (exists('preds')) {
+      stack(preds, thisPred)
+    } else {
+      thisPred
+    }
+    
+  }
+  
+  return(preds)
+  
+}
+
+## start cleaning ##
 
 sink('./cleaning_script.txt')
 for(sp in speciesList) {
@@ -107,8 +210,8 @@ for(sp in speciesList) {
       
       # remove records outside of study region countries
       occs <- occs[(occs$country == 'United States' 
-                   | occs$country == 'Canada'
-                   | occs$country == 'Mexico' ),]
+                    | occs$country == 'Canada'
+                    | occs$country == 'Mexico' ),]
       
       # if date_collected column is duplicated, remove one of them
       occs <- occs[!duplicated(as.list(occs))]
@@ -140,7 +243,7 @@ for(sp in speciesList) {
       
       # how many are deemed "imprecise"?
       cat(paste0("Number of occurrences with precision > 1,000 m = ", 
-                   length(which(occs$precision > 1000)), '\n'))
+                 length(which(occs$precision > 1000)), '\n'))
       
       # ...and remove occurrences where precision > 1,000 m
       occs <- occs[which(occs$precision <= 1000), ]
@@ -241,8 +344,8 @@ for(sp in speciesList) {
           
           cat(paste0("Buffer distance = ", t, " km\n"))
           cat(paste0("Number of occurrences outside buffer = ",
-                       length(which(speciesSf_thinned_buffered$within_buffer == 0)), '\n'))
-
+                     length(which(speciesSf_thinned_buffered$within_buffer == 0)), '\n'))
+          
           # if buffer has reached the thresholded value, stop increasing the buffer
           # & save it here
           if(length(which(speciesSf_thinned_buffered$within_buffer == 0)) < threshold) {
@@ -305,13 +408,13 @@ for(sp in speciesList) {
       filter(within_buffer > 0)
     
     # buffers create circles around the edges of the range map
-      # since the range map isn't one succinct polygon, there are serveral overlapping circles
-      # so we need to unionize them to create one all-encompassing buffer
+    # since the range map isn't one succinct polygon, there are serveral overlapping circles
+    # so we need to unionize them to create one all-encompassing buffer
     range_buffer_final <- st_union(range_buffer)
     
     finalRecordsFileName <- paste0('./species_records/03_', 
-                                     gsub(' ', '_', tolower(sp)), 
-                                     '_final_records.rData')
+                                   gsub(' ', '_', tolower(sp)), 
+                                   '_final_records.rData')
     
     save(speciesSf_final, range_buffer_final, file = finalRecordsFileName)
     
@@ -393,7 +496,7 @@ for(sp in speciesList) {
       ylab("Latitude") +
       ggtitle(paste0(sp, ' occurences'), 
               subtitle = paste0("(Cleaned, thinned, and duplicates eliminated, with buffer = ",
-                                                           buffer_distance, 
+                                buffer_distance, 
                                 " km)")) +
       theme(panel.grid.major = element_line(color = gray(0.5), 
                                             linetype = "dashed", 
@@ -407,11 +510,13 @@ for(sp in speciesList) {
     
     #   How many occurrences fell outside of the buffer?
     cat(paste0("Number of occurrences outside buffer & excluded = ", 
-                 length(which(speciesSf_thinned_buffered$within_buffer == 0)), '\n'))
-  
+               length(which(speciesSf_thinned_buffered$within_buffer == 0)), '\n'))
+    
   }
   sink()
-
+  
+  ## start modeling ##
+  
   sink('./ENM_script.txt')
   for (gcm in gcmList) {
     cat(paste0('\nGCM = ', gcm, ', Species: ', sp, '\n'))
@@ -420,61 +525,7 @@ for(sp in speciesList) {
     studyRegionFileName <- '/Volumes/lj_mac_22/pollen/predictions-FRAXINUS_meanpred_iceMask.tif'
     studyRegionRasts <- brick(studyRegionFileName)
     
-    # load climate for given gcm 
-    load(paste0('/Volumes/lj_mac_22/MOBOT/by_genus/env_data/', gcm, 
-                '/PCA_climate_rasters_pc', pc, '.Rdata'))
-    load(paste0('/Volumes/lj_mac_22/MOBOT/by_genus/env_data/', gcm, 
-                '/PCA_prcomp_pc', pc, '.Rdata'))
-    
-    # set constants for given gcm
-    fileName <- paste0('/Volumes/lj_mac_22/MOBOT/by_genus/env_data/', gcm, 
-                       '/clipped_data/envDataClipped_', climYear, 'YBP_pc', pc, '.tif')
-    vars <- names(clim[[1]])
-    
-    # set constants for Lorenz gcm's 
-    if (gcm == 'ccsm' | gcm == 'ecbilt') {
-      clim <- lorenz
-      workingFolder <- paste0('/Volumes/lj_mac_22/MOBOT/by_genus/env_data/', gcm, 
-                              '/tifs/', climYear, 'BP')
-      vars <- names(clim[[1]])
-    }
-    
-    ## load environment data from PCA ##
-    if (file.exists(fileName)) {  # if already clipped to respective year, load that 
-      envData <- brick(fileName)
-      names(envData) <- paste0('pca', 1:pc) # rename raster layers to match pc
-    } else { # otherwise, clip data to correct climate year
-      pcPrediction <- list()
-      
-      for (i in 1:length(clim)) { # label each env layer by variable name and year
-        names(clim[[i]]) <- vars
-        pcPrediction[i] <- raster::predict(clim[[i]], pca, index = 1:pc)
-        names(pcPrediction[[i]]) <- paste0("pc", 1:pc, "_", (i-1)*1000, "KYBP")
-      }
-      
-      envDataPca <- stack(pcPrediction)
-      
-      envYr <- pcPrediction[[(climYear/1000) + 1]] # keep only the PCA rasters for given climate year
-      names(envYr) <- paste0('pca', 1:pc) # label layers by pc
-      
-      ## sanity check for ensuring the rasters are in the correct projection
-        # print("Ensure that the projection of these rasters is WGS84:")
-        # print(paste0("Projection of envYr = ", projection(envYr)))
-      
-      envDataClipped <- list()
-     
-      for (n in 1:nlayers(envYr)) { # clip PCAs to study extent for given species
-        x <- envYr[[n]]
-        x <- crop(x, extent(studyRegionRasts[[n]]))
-        projection(x) <- getCRS("WGS84")
-        envDataClipped[[n]] <- x
-      }
-      
-      envData <- stack(envDataClipped)
-      
-      # plot(envData) # plot clipped environmental pca rasters
-      writeRaster(envData, fileName, format = 'GTiff', overwrite = T)
-    } 
+    getClimRasts(pc, climYear) # retrieve clipped env data for given climate year
     
     recordsFileName <- paste0('./species_records/03_', 
                               gsub(' ', '_', tolower(sp)), 
@@ -533,7 +584,7 @@ for(sp in speciesList) {
     load(bufferFileName)
     
     ## calculate calibration region at 320-km to extract bg sites from ##
-      # draw from all of NA #
+    # draw from all of NA #
     calibBuffer <- st_buffer(st_transform(st_as_sf(x = recordsSp), getCRS('albersNA')),
                              dist = as_units(320, 'km'))
     calibBuffer <- st_union(calibBuffer) # unionize
@@ -590,7 +641,7 @@ for(sp in speciesList) {
     env <- env[complete.cases(env), ] # remove NA values
     
     ## run maxent for species ##
-      # model tuning for easy fine-tuning later
+    # model tuning for easy fine-tuning later
     envModel_tune <- enmSdm::trainMaxNet(data = env, resp = 'presBg', 
                                          classes = 'lpq', out = c('models', 'tuning'))
     envModel <- envModel_tune$models[[1]] # select best fitted model
@@ -627,158 +678,32 @@ for(sp in speciesList) {
     save(envModel, file = modelFileName, compress = T, overwrite = T) # save model
     
     outputFileName <- paste0('./models/predictions/', speciesAb_, 
-                              '/GCM_', gcm, '_PC', pc, '.rData')
+                             '/GCM_', gcm, '_PC', pc, '.rData')
     save(range, envMap, envModel, records, file = outputFileName, overwrite = T)
-  }
-  sink()
-}
-
-getClimRasts <- function(pc, climYear) {
-  
-  # load climate for given gcm 
-  load(paste0('/Volumes/lj_mac_22/MOBOT/by_genus/env_data/', gcm, 
-              '/PCA_climate_rasters_pc', pc, '.Rdata'))
- 
-   if(exists('lorenz')) {
-    clim <- lorenz
-    rm(lorenz)
-  }
-  
-  load(paste0('/Volumes/lj_mac_22/MOBOT/by_genus/env_data/', gcm, 
-              '/PCA_prcomp_pc', pc, '.Rdata'))
-  
-  # set constants for given gcm
-  fileName <- paste0('/Volumes/lj_mac_22/MOBOT/by_genus/env_data/', gcm, 
-                     '/clipped_data/envDataClipped_', climYear, 'YBP_pc', pc, '.tif')
-  vars <- names(clim[[1]])
-  
-  if(gcm == 'hadley') {
-    land <- raster(paste0('/Volumes/lj_mac_22/MOBOT/by_genus/env_data/', 
-                          gcm, '/tifs/', vars[1], '/', vars[1],
-                          '_', climYear, 'ybp.tif'))
-  } else if (gcm == 'ccsm' | gcm == 'ecbilt') {
-    land <- raster(paste0('/Volumes/lj_mac_22/MOBOT/by_genus/env_data/', gcm,
-                          '/tifs/', climYear, 'BP/', vars[1], '.tif')) 
-  }
-  
-  # set constants for Lorenz gcm's 
-  if (gcm == 'ccsm' | gcm == 'ecbilt') {
-    clim <- lorenz
-    workingFolder <- paste0('/Volumes/lj_mac_22/MOBOT/by_genus/env_data/', gcm, 
-                            '/tifs/', climYear, 'BP')
-    vars <- names(clim[[1]])
-  }
-  
-  ## load environment data from PCA ##
-  if (file.exists(fileName)) {  # if already clipped to respective year, load that 
-    envData <- brick(fileName)
-    names(envData) <- paste0('pca', 1:pc) # rename raster layers to match pc
-  } else { # otherwise, clip data to correct climate year
-    pcPrediction <- list()
     
-    for (i in 1:length(clim)) { # label each env layer by variable name and year
-      names(clim[[i]]) <- vars
-      pcPrediction[i] <- raster::predict(clim[[i]], pca, index = 1:pc)
-      names(pcPrediction[[i]]) <- paste0("pc", 1:pc, "_", (i-1)*1000, "KYBP")
+    sink()
+    
+    dir.create('./predictions') # create directory to store predictions
+    
+    if(exists('preds')) rm(preds)
+    preds <- getPredictions(speciesAb_, pc)
+    
+    preds <- projectRaster(preds, studyRegionRasts) # project predictions to study region
+    
+    ## mask by study region and force values to be within [0, 1] ##
+    # because the rasters can get pushed outside this during re-projection #
+    preds <- raster::calc(preds, fun = function(x) ifelse(x < 0, 0, x))
+    preds <- raster::calc(preds, fun = function(x) ifelse(x > 1, 1, x))
+    
+    for (i in 1:nlayers(preds)) {
+      landMask <- (1 - studyRegionRasts[[i]])
+      preds[[i]] <- preds[[i]] * landMask
     }
     
-    envDataPca <- stack(pcPrediction)
+    # names(preds) <- paste0('ybp', seq(21000, 0, by=-1000)) # rename rasters to respective year
     
-    envYr <- pcPrediction[[(climYear/1000) + 1]] # keep only the PCA rasters for given climate year
-    names(envYr) <- paste0('pca', 1:pc) # label layers by pc
+    writeRaster(stack(preds), paste0('./predictions/', gcm, '/', speciesAb_, '_GCM_', gcm, '_PC', pc),
+                format = 'GTiff', overwrite = T)
     
-    ## sanity check for ensuring the rasters are in the correct projection
-    # print("Ensure that the projection of these rasters is WGS84:")
-    # print(paste0("Projection of envYr = ", projection(envYr)))
-    
-    envDataClipped <- list()
-    
-    for (n in 1:nlayers(envYr)) { # clip PCAs to study extent for given species
-      x <- envYr[[n]]
-      x <- crop(x, extent(studyRegionRasts[[n]]))
-      projection(x) <- getCRS("WGS84")
-      envDataClipped[[n]] <- x
-    }
-    
-    envData <- stack(envDataClipped)
-    
-    # plot(envData) # plot clipped environmental pca rasters
-    writeRaster(envData, fileName, format = 'GTiff', overwrite = T)
-  
-  if (gcm == 'hadley') { # hadley
-    load('./data_and_analyses/env_data/Beyer/PCA_clim.Rdata')
-    load(paste0('./data_and_analyses/env_data/Beyer/pca_pc', pc, '.Rdata'))
-    fileName <- paste0('./data_and_analyses/env_data/Beyer/envDataClipped_',
-                       climYear, 'YBP_pc', pc, '.tif')
-    vars <- c("BIO1", paste0('BIO', 4:19), "cloudiness", "relative_humidity")
-    land <- raster(paste0('./data_and_analyses/env_data/Beyer/tifs/BIO1_', 
-                          climYear, 'ybp.tif'))
-  } else if (gcm == 'Lorenz_ccsm') { # CCSM
-    load(paste0('./data_and_analyses/env_data/Lorenz/PCA_', gcm, '_clim.Rdata')) 
-    load(paste0('./data_and_analyses/env_data/Lorenz/V2/ccsm_21-0k_all_tifs_LJ/pca_pc', pc, '.Rdata')) 
-    fileName <- paste0('./data_and_analyses/env_data/Lorenz/V2/ccsm_21-0k_all_tifs_LJ/envDataClipped_',
-                       climYear, 'YBP_pc', pc, '.tif')
-    clim <- lorenz
-    workingFolder <- paste0('./data_and_analyses/env_data/Lorenz/V2/ccsm_21-0k_all_tifs_LJ/', 
-                            climYear, 'BP')
-    vars <- names(clim[[1]])
-    land <- raster(paste0('./data_and_analyses/env_data/Lorenz/V2/ccsm_21-0k_all_tifs_LJ/', 
-                          climYear, 'BP/an_avg_TMAX.tif'))
-  } else { # ECBilt
-    load(paste0('./data_and_analyses/env_data/Lorenz/PCA_', gcm, '_clim.Rdata')) 
-    load(paste0('./data_and_analyses/env_data/Lorenz/V2/ecbilt_21-0k_all_tifs_LJ/pca_pc', pc, '.Rdata'))
-    fileName <- paste0('./data_and_analyses/env_data/Lorenz/V2/ecbilt_21-0k_all_tifs_LJ/envDataClipped_',
-                       climYear, 'YBP_pc', pc, '.tif')
-    clim <- lorenz
-    workingFolder <- paste0('./data_and_analyses/env_data/Lorenz/V2/',
-                            gcm, '_21-0k_all_tifs_LJ/', climYear, 'BP')
-    vars <- names(clim[[1]])
-    land <- raster(paste0('./data_and_analyses/env_data/Lorenz/V2/ccsm_21-0k_all_tifs_LJ/', 
-                          climYear, 'BP/an_avg_TMAX.tif'))
   }
-  
-  if (file.exists(fileName)) {
-    envData <- brick(fileName)
-    # rename raster layers to pc's
-    names(envData) <- paste0('pca', 1:pc)
-  } else {
-    pcPrediction <<- list()
-    # label each env layer by variable and year
-    for (i in 1:length(clim)) {
-      names(clim[[i]]) <- vars
-      pcPrediction[i] <- raster::predict(clim[[i]], pca, index = 1:pc)
-      names(pcPrediction[[i]]) <- paste0("pc", 1:pc, "_", (i-1)*1000, "KYBP")
-    }
-    
-    envDataPca <- stack(pcPrediction)
-    
-    # keep only rasters (first five rasters) for climate year
-    envYr <- pcPrediction[[(climYear/1000) + 1]]
-    # plot(envYr) 
-    names(envYr) <- paste0('pca', 1:pc)
-    
-    # check projections = wgs84
-    print("Ensure that the projection of these rasters is WGS84:")
-    print(paste0("Projection of envYr = ", projection(envYr)))
-    
-    # clip environmental PCAs to study extent for given species, visualize, and save:
-    envDataClipped <- list()
-    for (n in 1:nlayers(envYr)) {
-      # land <- land * 0 + 1
-      # land <- projectRaster(land, envYr)
-      # land <- land * 0 + 1
-      # envYr[[n]] <- envYr[[n]] * land
-      x <- envYr[[n]]
-      x <- crop(x, extent(studyRegionRasts[[which(climYears == 21000)]]))
-      # x <<- mask(x, studyRegion)
-      projection(x) <- getCRS("WGS84")
-      envDataClipped[[n]] <- x
-    }
-    envData <- stack(envDataClipped)
-    plot(envData)
-    writeRaster(envData, fileName, format = 'GTiff', overwrite = T)
-  } 
-  
-  return(envData)
-  
 }
