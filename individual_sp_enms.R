@@ -226,7 +226,7 @@ getPredictions <- function(speciesAb_, pc) { # predict suitability for a given y
 
 ## start cleaning ##
 
-sink('./cleaning_script.txt')
+sink('./ENM_script.txt')
 for(sp in speciesList) {
   cat(paste0('SPECIES = ', sp, '\n'))
   speciesAb_ <- sub("(.{4})(.*)", "\\1_\\2", 
@@ -513,11 +513,9 @@ for(sp in speciesList) {
                length(which(speciesSf_thinned_buffered$within_buffer == 0)), '\n'))
     
   }
-  sink()
   
   ## start modeling ##
   
-  sink('./ENM_script.txt')
   for (gcm in gcmList) {
     cat(paste0('\nGCM = ', gcm, ', Species: ', sp, '\n'))
     
@@ -681,8 +679,6 @@ for(sp in speciesList) {
                              '/GCM_', gcm, '_PC', pc, '.rData')
     save(range, envMap, envModel, records, file = outputFileName, overwrite = T)
     
-    sink()
-    
     if(!dir.exists('./predictions')) dir.create('./predictions') # create directory to store predictions
     
     if(exists('preds')) rm(preds)
@@ -709,3 +705,5 @@ for(sp in speciesList) {
     
   }
 }
+sink()
+
