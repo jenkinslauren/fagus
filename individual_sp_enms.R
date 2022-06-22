@@ -705,7 +705,7 @@ for(sp in speciesList) {
     writeRaster(stack(preds), paste0('./predictions/', gcm, '/', speciesAb_, '_GCM_', gcm, '_PC', pc),
                 format = 'GTiff', overwrite = T)
     
-    save.image(paste0('./workspaces/06 - ', gcm, ' predictions'))
+    save.image(paste0('./workspaces/06 - predictions (', gcm, ')'))
     
   }
 }
