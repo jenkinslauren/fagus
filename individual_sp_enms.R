@@ -129,6 +129,73 @@ getClimRasts <- function(pc, climYear) { # retrieve clipped climate rasters for 
   
 }
 
+# function for calculating the proper buffer distance to include desired % of occurrences
+calculate_buffer <- function(t) {
+  while (TRUE) {
+    t <- t + 10 # increase threshold value by 10 each iteration
+    buffer_distance_temp <- as_units(t, "km") # convert to km units
+    range_buffer <- st_buffer(rangeMapAlb, dist = buffer_distance_temp)
+    
+    # only keeped occurrences within buffered distance
+    speciesSf_thinned_buffered <- speciesSf_thinnedAlb %>%
+      mutate(within_range = lengths(st_within(x = speciesSf_thinnedAlb,
+                                              y = rangeMapAlb)),
+             within_buffer = lengths(st_within(x = speciesSf_thinnedAlb,
+                                               y = range_buffer)))
+    
+    ## sanity checking ... ##
+    ## uncomment the following lines to see how the # of occurrences outside
+    ## the buffer decreases as the buffer distance increases
+    
+    cat(paste0("Buffer distance = ", t, " km\n"))
+    cat(paste0("Number of occurrences outside buffer = ",
+               length(which(speciesSf_thinned_buffered$within_buffer == 0)), '\n'))
+    
+    # if buffer has reached the thresholded value, stop increasing the buffer
+    # & save it here
+    if(length(which(speciesSf_thinned_buffered$within_buffer == 0)) < threshold) {
+      if (t < 200) { # to accommodate for species with very few records,
+        # if the calculated buffer is < 200 km,
+        # double it to ensure enough records are included in model
+        
+        cat(paste0('Yes, buffer distance is < 200 (', t, ' km), so doubling buffer distance...\n'))
+        buffer_distance <- as_units((t*2), 'km') # double buffer distance
+        
+        cat(paste0('New buffer distance = ', buffer_distance, ' km\n'))
+        range_buffer <- st_buffer(rangeMapAlb, dist = buffer_distance)
+        
+        # recalculate buffers with new buffer distance
+        speciesSf_thinned_buffered <<- speciesSf_thinnedAlb %>%
+          mutate(within_range = lengths(st_within(x = speciesSf_thinnedAlb,
+                                                  y = rangeMapAlb)),
+                 within_buffer = lengths(st_within(x = speciesSf_thinnedAlb,
+                                                   y = range_buffer)))
+        speciesSf_occs_buffered <<- speciesSf_occsAlb %>% 
+          mutate(within_range = lengths(st_within(x = speciesSf_occsAlb,
+                                                  y = rangeMapAlb)),
+                 within_buffer = lengths(st_within(x = speciesSf_occsAlb,
+                                                   y = range_buffer)))
+        
+        # save buffer data to use later
+        save(buffer_distance, range_buffer, speciesSf_thinned_buffered, 
+             speciesSf_occs_buffered, file = bufferFileName)
+      } else { # if the calculated buffer is larger than 200 km, use that distance 
+        buffer_distance <<- buffer_distance_temp
+        speciesSf_occs_buffered <<- speciesSf_occsAlb %>% 
+          mutate(within_range = lengths(st_within(x = speciesSf_occsAlb,
+                                                  y = rangeMapAlb)),
+                 within_buffer = lengths(st_within(x = speciesSf_occsAlb,
+                                                   y = range_buffer)))
+        
+        # save buffer data to use later
+        save(buffer_distance, range_buffer, speciesSf_thinned_buffered, 
+             speciesSf_occs_buffered, file = bufferFileName)
+      }
+      break
+    }
+  }
+}
+
 getPredictions <- function(speciesAb_, pc) { # predict suitability for a given year
   
   predictors <- c(paste0('pca', 1:pc))
@@ -324,73 +391,6 @@ for(sp in speciesList) {
       speciesSf_thinnedAlb <- st_transform(speciesSf_thinned, getCRS('albersNA'))
       speciesSf_occsAlb <- st_transform(speciesSf_occs, getCRS('albersNA'))
       
-      # function for calculating the proper buffer distance to include desired % of occurrences
-      calculate_buffer <- function(t) {
-        while (TRUE) {
-          t <- t + 10 # increase threshold value by 10 each iteration
-          buffer_distance_temp <- as_units(t, "km") # convert to km units
-          range_buffer <- st_buffer(rangeMapAlb, dist = buffer_distance_temp)
-          
-          # only keeped occurrences within buffered distance
-          speciesSf_thinned_buffered <- speciesSf_thinnedAlb %>%
-            mutate(within_range = lengths(st_within(x = speciesSf_thinnedAlb,
-                                                    y = rangeMapAlb)),
-                   within_buffer = lengths(st_within(x = speciesSf_thinnedAlb,
-                                                     y = range_buffer)))
-          
-          ## sanity checking ... ##
-          ## uncomment the following lines to see how the # of occurrences outside
-          ## the buffer decreases as the buffer distance increases
-          
-          cat(paste0("Buffer distance = ", t, " km\n"))
-          cat(paste0("Number of occurrences outside buffer = ",
-                     length(which(speciesSf_thinned_buffered$within_buffer == 0)), '\n'))
-          
-          # if buffer has reached the thresholded value, stop increasing the buffer
-          # & save it here
-          if(length(which(speciesSf_thinned_buffered$within_buffer == 0)) < threshold) {
-            if (t < 200) { # to accommodate for species with very few records,
-              # if the calculated buffer is < 200 km,
-              # double it to ensure enough records are included in model
-              
-              cat(paste0('Yes, buffer distance is < 200 (', t, ' km), so doubling buffer distance...\n'))
-              buffer_distance <- as_units((t*2), 'km') # double buffer distance
-              
-              cat(paste0('New buffer distance = ', buffer_distance, ' km\n'))
-              range_buffer <- st_buffer(rangeMapAlb, dist = buffer_distance)
-              
-              # recalculate buffers with new buffer distance
-              speciesSf_thinned_buffered <<- speciesSf_thinnedAlb %>%
-                mutate(within_range = lengths(st_within(x = speciesSf_thinnedAlb,
-                                                        y = rangeMapAlb)),
-                       within_buffer = lengths(st_within(x = speciesSf_thinnedAlb,
-                                                         y = range_buffer)))
-              speciesSf_occs_buffered <<- speciesSf_occsAlb %>% 
-                mutate(within_range = lengths(st_within(x = speciesSf_occsAlb,
-                                                        y = rangeMapAlb)),
-                       within_buffer = lengths(st_within(x = speciesSf_occsAlb,
-                                                         y = range_buffer)))
-              
-              # save buffer data to use later
-              save(buffer_distance, range_buffer, speciesSf_thinned_buffered, 
-                   speciesSf_occs_buffered, file = bufferFileName)
-            } else { # if the calculated buffer is larger than 200 km, use that distance 
-              buffer_distance <<- buffer_distance_temp
-              speciesSf_occs_buffered <<- speciesSf_occsAlb %>% 
-                mutate(within_range = lengths(st_within(x = speciesSf_occsAlb,
-                                                        y = rangeMapAlb)),
-                       within_buffer = lengths(st_within(x = speciesSf_occsAlb,
-                                                         y = range_buffer)))
-              
-              # save buffer data to use later
-              save(buffer_distance, range_buffer, speciesSf_thinned_buffered, 
-                   speciesSf_occs_buffered, file = bufferFileName)
-            }
-            break
-          }
-        }
-      }
-      
       t <- 10 # start buffer distance at 10 km
       
       # calculate buffer
@@ -525,7 +525,7 @@ for(sp in speciesList) {
     studyRegionFileName <- '/Volumes/lj_mac_22/pollen/predictions-FRAXINUS_meanpred_iceMask.tif'
     studyRegionRasts <- brick(studyRegionFileName)
     
-    getClimRasts(pc, climYear) # retrieve clipped env data for given climate year
+    envData <- getClimRasts(pc, climYear) # retrieve clipped env data for given climate year
     
     recordsFileName <- paste0('./species_records/03_', 
                               gsub(' ', '_', tolower(sp)), 
@@ -683,7 +683,7 @@ for(sp in speciesList) {
     
     sink()
     
-    dir.create('./predictions') # create directory to store predictions
+    if(!dir.exists('./predictions')) dir.create('./predictions') # create directory to store predictions
     
     if(exists('preds')) rm(preds)
     preds <- getPredictions(speciesAb_, pc)
@@ -704,6 +704,8 @@ for(sp in speciesList) {
     
     writeRaster(stack(preds), paste0('./predictions/', gcm, '/', speciesAb_, '_GCM_', gcm, '_PC', pc),
                 format = 'GTiff', overwrite = T)
+    
+    save.image(paste0('./workspaces/06 - ', gcm, ' predictions'))
     
   }
 }
