@@ -56,9 +56,11 @@ pc <- 5 # number of principal components used from environmental data
 gcmList <- c('hadley', 'ccsm', 'ecbilt') # general circulation models for env data
 
 # reference raster from ccsm env data for cell size, used in thinning
-lorenzRast <- raster::raster('/Volumes/lj_mac_22/MOBOT/PVMvsENM/data_and_analyses/env_data/Lorenz/V2/ccsm_21-0k_all_tifs_LJ/0BP/an_avg_ETR.tif')
+lorenzRast <- raster::raster('/Volumes/lj_mac_22/MOBOT/by_genus/env_data/ccsm/tifs/0BP/an_avg_ETR.tif')
 
 ## helper functions ##
+
+# function for retrieving clipped PCA climate rasters for a given year #
 getClimRasts <- function(pc, climYear) { # retrieve clipped climate rasters for a given year
   
   # load climate for given gcm 
@@ -129,7 +131,7 @@ getClimRasts <- function(pc, climYear) { # retrieve clipped climate rasters for 
   
 }
 
-# function for calculating the proper buffer distance to include desired % of occurrences
+# function for calculating the proper buffer distance to include desired % of occurrences #
 calculate_buffer <- function(t) {
   while (TRUE) {
     t <- t + 10 # increase threshold value by 10 each iteration
@@ -196,6 +198,7 @@ calculate_buffer <- function(t) {
   }
 }
 
+# function for predictions across time steps #
 getPredictions <- function(speciesAb_, pc) { # predict suitability for a given year
   
   predictors <- c(paste0('pca', 1:pc))
@@ -206,9 +209,9 @@ getPredictions <- function(speciesAb_, pc) { # predict suitability for a given y
     
     # predict suitability #
     thisPred <- predict(climate[[predictors]], 
-                                      envModel, 
-                                      clamp = F, 
-                                      type='cloglog')
+                        envModel, 
+                        clamp = F, 
+                        type='cloglog')
     names(thisPred) <- (paste0(yr, ' ybp'))
     # plot(thisPred, main = paste0("prediction at ", climYear, " ybp"))
     
@@ -222,6 +225,18 @@ getPredictions <- function(speciesAb_, pc) { # predict suitability for a given y
   
   return(preds)
   
+}
+
+getBG <- function(bgFileName, calibRegion) {
+  # get 20,000 random background sites from calibration region
+  bgTestSpAlb <- suppressWarnings(sp::spsample(calibRegion, n=20000, 
+                                               type='random', iter = 10))
+  
+  bgTestSp <- sp::spTransform(bgTestSpAlb, wgs84_crs) # transform to wgs84
+  bgCalib <- as.data.frame(coordinates(bgTestSp)) # lat/long of background sites
+  names(bgCalib) <- ll
+  
+  save(bgTestSp, bgCalib, file = bgFileName, compress = T, overwrite = T)
 }
 
 ## start cleaning ##
@@ -592,20 +607,12 @@ for(sp in speciesList) {
     calibRegionSpWgs <- sp::spTransform(calibRegionSpAlb, getCRS('wgs84', TRUE))
     
     # set constants for retrieving background sites #
-    bgFileName <- './background_sites/Random Background Sites across Study Region.Rdata'
+    bgFileName <- '/Volumes/lj_mac_22/MOBOT/by_genus/background_sites/Random Background Sites across Study Region.Rdata'
     
     # load bg sites in calibration region if they have already been defined (bgTestSp, bgCalib, bgEnv, bg)
-    if (file.exists(bgFileName)) load(bgFileName) else { 
-      # otherwise, get 20,000 random background sites from calibration region
-      bgTestSpAlb <- suppressWarnings(sp::spsample(calibRegionSpAlb, n=20000, 
-                                                   type='random', iter = 10))
-      
-      bgTestSp <- sp::spTransform(bgTestSpAlb, wgs84_crs) # transform to wgs84
-      bgCalib <- as.data.frame(coordinates(bgTestSp)) # lat/long of background sites
-      names(bgCalib) <- ll
-      
-      save(bgTestSp, bgCalib, file = bgFileName, compress = T, overwrite = T)
-    }
+    # otherwise, define bg points
+    if(!file.exists(bgFileName)) getBG(bgFileName, calibRegionSpAlb)
+    load(bgFileName)
     
     # plot the bg sites to verify
     plot(bgTestSp, pch = 16, cex = 0.5, col = "red", 
@@ -657,6 +664,11 @@ for(sp in speciesList) {
       overwrite = T,
       type='cloglog')
     
+    # remove XML file if it's created
+    file.remove(list.files(path = paste0('./models/predictions/', speciesAb_, '/'),
+                           pattern = '.xml',
+                           full.names = T))
+    
     envMapSp <- rasterToPolygons(envMap) # convert to spatial object for plotting
     
     plot(range, border = 'blue', main = paste0('Maxent output, ', sp))
@@ -672,7 +684,7 @@ for(sp in speciesList) {
     plot(range, border = 'blue', add = TRUE)
     
     modelFileName <- paste0('./models/', speciesAb_, '_Maxent_PC', 
-                            pc, '_GCM_', gcm, '.Rdata')
+                            pc, '_GCM_', gcm, '.rData')
     save(envModel, file = modelFileName, compress = T, overwrite = T) # save model
     
     outputFileName <- paste0('./models/predictions/', speciesAb_, 
@@ -701,9 +713,13 @@ for(sp in speciesList) {
     writeRaster(stack(preds), paste0('./predictions/', gcm, '/', speciesAb_, '_GCM_', gcm, '_PC', pc),
                 format = 'GTiff', overwrite = T)
     
+    file.remove(list.files(path = paste0('./predictions/', gcm),
+                           pattern = '.xml',
+                           full.names = T))
+    
     save.image(paste0('./workspaces/06 - predictions (', gcm, ')'))
     
   }
 }
-sink()
 
+sink()

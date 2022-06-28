@@ -1,2 +1,6 @@
+SPECIES = Fagus grandifolia
+[1] "Already cleaned!\n"
 
-GCM = hadley, Species: Fagus grandifolia
+GCM = ccsm, Species: Fagus grandifolia
+
+GCM = ecbilt, Species: Fagus grandifolia
