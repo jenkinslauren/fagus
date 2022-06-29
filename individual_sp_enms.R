@@ -35,9 +35,11 @@ library(enmSdm)
 library(maxnet)
 
 ## genus constants ##
-genus <- 'fagus'
-speciesList <- paste0('Fagus ', 
-                      c('grandifolia'))
+genus <- 'fraxinus'
+speciesList <- paste0('Fraxinus ', 
+                      c('cuspidata',
+                        'greggii', 'nigra', 'pennsylvanica', 
+                        'profunda', 'quadrangulata'))
 
 setwd(paste0('/Volumes/lj_mac_22/MOBOT/by_genus/', genus))
 
@@ -710,6 +712,7 @@ for(sp in speciesList) {
     
     # names(preds) <- paste0('ybp', seq(21000, 0, by=-1000)) # rename rasters to respective year
     
+    if(!dir.exists(paste0('./predictions/', gcm))) dir.create(paste0('./predictions/', gcm))
     writeRaster(stack(preds), paste0('./predictions/', gcm, '/', speciesAb_, '_GCM_', gcm, '_PC', pc),
                 format = 'GTiff', overwrite = T)
     
