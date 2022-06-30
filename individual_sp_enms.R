@@ -37,11 +37,20 @@ library(maxnet)
 ## genus constants ##
 genus <- 'fraxinus'
 speciesList <- paste0('Fraxinus ', 
-                      c('cuspidata',
+                      c('americana', 'caroliniana','cuspidata',
                         'greggii', 'nigra', 'pennsylvanica', 
                         'profunda', 'quadrangulata'))
 
-setwd(paste0('/Volumes/lj_mac_22/MOBOT/by_genus/', genus))
+# if running on the cluster #
+cluster <- T
+
+if(cluster == T) {
+  baseFolder <- '/mnt/research/TIMBER/PVMvsENM/'
+  setwd(paste0(baseFolder, genus, '/in/'))
+} else {
+  baseFolder <- '/Volumes/lj_mac_22/MOBOT/by_genus/'
+  setwd(paste0(baseFolder, genus))
+}
 
 # set constants #
 nad27_crs <- getCRS('nad27')
@@ -58,7 +67,7 @@ pc <- 5 # number of principal components used from environmental data
 gcmList <- c('hadley', 'ccsm', 'ecbilt') # general circulation models for env data
 
 # reference raster from ccsm env data for cell size, used in thinning
-lorenzRast <- raster::raster('/Volumes/lj_mac_22/MOBOT/by_genus/env_data/ccsm/tifs/0BP/an_avg_ETR.tif')
+lorenzRast <- raster::raster(paste0(baseFolder, 'env_data/ccsm/tifs/0BP/an_avg_ETR.tif'))
 
 ## helper functions ##
 
@@ -66,28 +75,27 @@ lorenzRast <- raster::raster('/Volumes/lj_mac_22/MOBOT/by_genus/env_data/ccsm/ti
 getClimRasts <- function(pc, climYear) { # retrieve clipped climate rasters for a given year
   
   # load climate for given gcm 
-  load(paste0('/Volumes/lj_mac_22/MOBOT/by_genus/env_data/', gcm, 
-              '/PCA_climate_rasters_pc', pc, '.Rdata'))
+  load(paste0(baseFolder, 'env_data/', gcm, '/PCA_climate_rasters_pc', pc, '.Rdata'))
+  load(paste0(baseFolder, 'env_data/', gcm, '/PCA_prcomp_pc', pc, '.Rdata'))
   
   if(exists('lorenz')) {
     clim <- lorenz
     rm(lorenz)
   }
   
-  load(paste0('/Volumes/lj_mac_22/MOBOT/by_genus/env_data/', gcm, 
-              '/PCA_prcomp_pc', pc, '.Rdata'))
-  
   # set constants for given gcm
-  fileName <- paste0('/Volumes/lj_mac_22/MOBOT/by_genus/env_data/', gcm, 
-                     '/clipped_data/envDataClipped_', climYear, 'YBP_pc', pc, '.tif')
+  fileName <- paste0(baseFolder, 'env_data/', gcm, '/clipped_data/envDataClipped_', 
+                     climYear, 'YBP_pc', pc, '.tif')
+  if(!dir.exists(paste0(baseFolder, 'env_data/', gcm, '/clipped_data'))) {
+    dir.create(paste0(baseFolder, 'env_data/', gcm, '/clipped_data')) }
   vars <- names(clim[[1]])
   
   if(gcm == 'hadley') {
-    land <- raster(paste0('/Volumes/lj_mac_22/MOBOT/by_genus/env_data/', 
-                          gcm, '/tifs/', vars[1], '/', vars[1],
+    land <- raster(paste0(baseFolder, 'env_data/', gcm, '/tifs/', 
+                          vars[1], '/', vars[1],
                           '_', climYear, 'ybp.tif'))
   } else if (gcm == 'ccsm' | gcm == 'ecbilt') {
-    land <- raster(paste0('/Volumes/lj_mac_22/MOBOT/by_genus/env_data/', gcm,
+    land <- raster(paste0(baseFolder, 'env_data/', gcm,
                           '/tifs/', climYear, 'BP/', vars[1], '.tif')) 
   }
   
@@ -252,10 +260,18 @@ for(sp in speciesList) {
   rangeName <- paste0('littleRange_', gsub('_', '', speciesAb_))
   
   # load Little range map for given species
+  if (cluster == T) {
+    range <- paste0('./USTreeAtlas/SHP/', 
+                    tolower(gsub('_', '', speciesAb_)), '/',
+                    tolower(gsub('_', '', speciesAb_)),
+                    '.shp')
+  } else {
   range <- paste0('/Volumes/lj_mac_22/MOBOT/USTreeAtlas/SHP/', 
                   tolower(gsub('_', '', speciesAb_)), '/',
                   tolower(gsub('_', '', speciesAb_)),
                   '.shp')
+  }
+  
   range <- suppressWarnings(shapefile(range))
   projection(range) <- enmSdm::getCRS('nad27')
   range <- range[range$CODE == 1, ] # remove holes
@@ -537,7 +553,8 @@ for(sp in speciesList) {
     cat(paste0('\nGCM = ', gcm, ', Species: ', sp, '\n'))
     
     # identify study region
-    studyRegionFileName <- '/Volumes/lj_mac_22/pollen/predictions-FRAXINUS_meanpred_iceMask.tif'
+    studyRegionFileName <- paste0('/Volumes/lj_mac_22/pollen/predictions-', 
+                                  toupper(genus), '_meanpred_iceMask.tif')
     studyRegionRasts <- brick(studyRegionFileName)
     
     envData <- getClimRasts(pc, climYear) # retrieve clipped env data for given climate year
@@ -655,7 +672,9 @@ for(sp in speciesList) {
     
     predictors <- c(paste0('pca', 1:pc))
     
-    # prediction for given year
+    if(!dir.exists(paste0('./models/predictions/', speciesAb_))) dir.create(paste0('./models/predictions/', speciesAb_))
+   
+     # prediction for given year
     envMap <- predict(
       climate[[predictors]], 
       envModel,
