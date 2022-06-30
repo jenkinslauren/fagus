@@ -553,7 +553,7 @@ for(sp in speciesList) {
     cat(paste0('\nGCM = ', gcm, ', Species: ', sp, '\n'))
     
     # identify study region
-    studyRegionFileName <- paste0('/Volumes/lj_mac_22/pollen/predictions-', 
+    studyRegionFileName <- paste0('./pollen/predictions-', 
                                   toupper(genus), '_meanpred_iceMask.tif')
     studyRegionRasts <- brick(studyRegionFileName)
     
@@ -626,7 +626,8 @@ for(sp in speciesList) {
     calibRegionSpWgs <- sp::spTransform(calibRegionSpAlb, getCRS('wgs84', TRUE))
     
     # set constants for retrieving background sites #
-    bgFileName <- '/Volumes/lj_mac_22/MOBOT/by_genus/background_sites/Random Background Sites across Study Region.Rdata'
+    bgFileName <- paste0(baseFolder, 
+                         'background_sites/Random Background Sites across Study Region.Rdata')
     
     # load bg sites in calibration region if they have already been defined (bgTestSp, bgCalib, bgEnv, bg)
     # otherwise, define bg points
