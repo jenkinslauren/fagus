@@ -34,22 +34,33 @@ library(tidyr)
 library(enmSdm)
 library(maxnet)
 
-## genus constants ##
-genus <- 'fraxinus'
-speciesList <- paste0('Fraxinus ', 
-                      c('americana', 'caroliniana','cuspidata',
-                        'greggii', 'nigra', 'pennsylvanica', 
-                        'profunda', 'quadrangulata'))
-
 # if running on the cluster #
 cluster <- T
 
-if(cluster == T) {
+if(cluster == T) { # constants for running on cluster
+  args <- commandArgs(TRUE)
+  gcmList <- args[1]
+  gcmList <- unlist(gcmList)
+  genus <- args[2]
+  genus <- as.character(genus)
+  speciesList <- args[3]
+  speciesList <- strsplit(speciesList, split = ', ')
+  speciesList <- unlist(speciesList)
+  
   baseFolder <- '/mnt/research/TIMBER/PVMvsENM/'
   setwd(paste0(baseFolder, genus, '/in/'))
-} else {
+  
+} else { # constants for running locally
+  ## genus constants ##
+  genus <- 'fraxinus'
+  speciesList <- paste0('Fraxinus ', 
+                        c('americana', 'caroliniana','cuspidata',
+                          'greggii', 'nigra', 'pennsylvanica', 
+                          'profunda', 'quadrangulata'))
+  
   baseFolder <- '/Volumes/lj_mac_22/MOBOT/by_genus/'
   setwd(paste0(baseFolder, genus))
+  gcmList <- c('hadley', 'ccsm', 'ecbilt') # general circulation models for env data
 }
 
 # set constants #
@@ -63,8 +74,6 @@ climYears <- seq(21000, 0, by=-1000)
 climYear <- 0 # only modeling present-day in this script
 
 pc <- 5 # number of principal components used from environmental data
-
-gcmList <- c('hadley', 'ccsm', 'ecbilt') # general circulation models for env data
 
 # reference raster from ccsm env data for cell size, used in thinning
 lorenzRast <- raster::raster(paste0(baseFolder, 'env_data/ccsm/tifs/0BP/an_avg_ETR.tif'))
