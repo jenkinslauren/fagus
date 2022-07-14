@@ -12,6 +12,6 @@ module load GCC/8.3.0 OpenMPI/3.1.4 R/4.0.2
 
 cd /mnt/research/TIMBER/PVMvsENM/fagus/code
 
-Rscript ENM_template.R 'hadley' ‘fagus’ 'Fagus grandifolia’
+Rscript ENM_template.R hadley fagus 'Fagus grandifolia'
 
 scontrol show job ${SLURM_JOB_ID}
